@@ -1,6 +1,13 @@
-from numpy import array
-__all__ = ["data"]
-data = array([[   1.,    6.,    4.,   12.,    5.,    5.,    3.,    4.,    1.,
+import numpy as np
+import scipy as sp
+import scipy.stats as stats
+
+def two_way(a):
+    assert(a.shape[1]-1 >= 0)
+    return np.hstack([(a[:,i:i+1] * a[:,i+1:]) for i in range(a.shape[1]-1)])
+
+__all__ = ["data", "data_z", "data_z_2way"]
+data = np.array([[   1.,    6.,    4.,   12.,    5.,    5.,    3.,    4.,    1.,
           67.,    3.,    2.,    1.,    2.,    1.,    0.,    0.,    1.,
            0.,    0.,    1.,    0.,    0.,    1.,    1.],
        [   2.,   48.,    2.,   60.,    1.,    3.,    2.,    2.,    1.,
@@ -3000,3 +3007,7 @@ data = array([[   1.,    6.,    4.,   12.,    5.,    5.,    3.,    4.,    1.,
        [   2.,   45.,    4.,   46.,    2.,    1.,    3.,    4.,    3.,
           27.,    3.,    1.,    1.,    1.,    1.,    0.,    1.,    1.,
            0.,    0.,    1.,    0.,    0.,    1.,    1.]])
+
+data_z = np.hstack((stats.zscore(data[:, :24]), np.atleast_2d(-2 * (data[:, -1] - 1.5)).T))
+
+data_z_2way = np.hstack([data_z[:, :-1], two_way(data_z[:, :-1]), data_z[:, -1:]])
