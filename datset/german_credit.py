@@ -15,9 +15,11 @@ from numpy import exp, log, sqrt
 from scipy.misc import logsumexp
 from numpy.linalg import inv
 
+import distributions as dist
+
 from datset.tools import *
 
-__all__ = ["credit_plain", "credit_hlr"]
+__all__ = ["credit_plain", "credit_hlr", "credit_simple_is"]
 
 def credit_plain(sigma):
     from  datset.data.german_credit import data_z as data
@@ -254,4 +256,71 @@ def credit_hlr(lambd, softplus_transform = False):
          1.13880587e-04,  -4.97529934e-04]) # ~ 6813.2176032 (yes, this is positive. remember this is only proportional to the true log posterior)
     if softplus_transform:
         rval_lpost.opt_0_01[0] = log(exp(rval_lpost.opt_0_01[0]) - 1)
+
     return (rval_lpost, rval_lgrad, rval_lp_lgrad)
+
+
+
+
+
+
+class PlainPropDistr(object):
+    def __init__(self, def_ratio, mu):
+        self.def_ratio = 0.1
+        self.def_prop_dist = dist.mvt(mu, np.eye(mu.size)*10, 25)
+        self.prop_dist = dist.mvnorm(mu, np.eye(mu.size))
+    
+    def logpdf(self, s):
+        return logsumexp([self.def_prop_dist.logpdf(s) + log(self.def_ratio),
+                           self.prop_dist.logpdf(s) + log(1-self.def_ratio)],0)
+    def rvs(self, num_samps):
+        def_num_samps = int(num_samps * self.def_ratio)
+        nondef_num_samps = num_samps - def_num_samps
+        samps = self.prop_dist.rvs(nondef_num_samps)
+        if self.def_ratio > 0:
+            samps = np.vstack([samps, self.def_prop_dist.rvs(def_num_samps)])
+        
+        return samps
+
+class HlrPropDistr(object):
+    def __init__(self, def_ratio, mu):
+        self.def_ratio = 0.1
+        self.def_sigsq_dist = stats.gamma(mu[0]/20, scale=20)
+        self.def_rest_dist = dist.mvt(mu[1:], np.eye(mu.size - 1)*20, 10)
+        self.sigsq_dist = stats.gamma(mu[0]/5, scale=5)
+        self.rest_dist = dist.mvnorm(mu[1:], np.eye(mu.size - 1)*5)
+    
+    def logpdf(self, s):
+        return logsumexp([self.def_sigsq_dist.logpdf(s[:, :1]) + self.def_rest_dist.logpdf(s[:, 1:]) + log(self.def_ratio),
+                           self.sigsq_dist.logpdf(s[:, :1]) + self.rest_dist.logpdf(s[:, 1:]) + log(1.-self.def_ratio)],0)
+    def rvs(self, num_samps):
+        def_num_samps = int(num_samps * self.def_ratio)
+        nondef_num_samps = num_samps - def_num_samps
+        samps = np.hstack([self.sigsq_dist.rvs(nondef_num_samps)[:, np.newaxis], self.rest_dist.rvs(nondef_num_samps)])
+        if self.def_ratio > 0:
+            samps = np.vstack([samps,
+                               np.hstack([self.def_sigsq_dist.rvs(def_num_samps)[:, np.newaxis], self.def_rest_dist.rvs(def_num_samps)])])
+        assert(np.all(samps[:, 0]>0))
+        return samps       
+
+
+def credit_simple_is(name_dataset, num_samps):
+    def_ratio = 0.1    
+    if name_dataset == "plain":
+        (f, _, _) = credit_plain(10)
+        prop_dist = PlainPropDistr(def_ratio, f.opt10)
+    elif name_dataset == "hlr":
+        (f, _, _) = credit_hlr(0.01)
+        prop_dist = HlrPropDistr(def_ratio, f.opt_0_01)
+        
+    samps = prop_dist.rvs(num_samps)
+    lprop = prop_dist.logpdf(samps)[:, None]
+    lpost = np.apply_along_axis(f, 1, samps)
+    lw = lpost - lprop
+    lw_norm = lw - logsumexp(lw)
+    
+    w_norm = exp(lw_norm)
+    mu = np.sum(samps*w_norm, 0)
+    var = np.sum((samps-mu)**2*w_norm, 0)
+    print("expectation", mu, var)
+    return {"mu": mu, "var": var, "samps":samps, "lw":lw, "w_norm":w_norm}
