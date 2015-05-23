@@ -19,7 +19,7 @@ import distributions as dist
 
 from datset.tools import *
 
-__all__ = ["credit_plain", "credit_hlr", "credit_simple_is"]
+__all__ = ["credit_plain", "credit_plain_theano", "credit_hlr", "credit_hlr_theano", "credit_simple_is"]
 
 def credit_plain(sigma):
     from  datset.data.german_credit import data_z as data
@@ -84,6 +84,203 @@ def credit_plain(sigma):
        -0.12209968,  0.06004149,  0.08724909,  0.02553138,  0.02414447]) #lpost: ~= -467.7
 
     return (rval_lpost, rval_lgrad, rval_lp_lgrad)
+
+
+def credit_plain_theano(sigma):
+    import theano.tensor as T
+    import theano
+    
+    def LogSumExp(x, axis=None):
+        x_max = T.max(x, axis=axis, keepdims=True)
+        return T.log(T.sum(T.exp(x - x_max), axis=axis, keepdims=True)) + x_max
+    
+    from  datset.data.german_credit import data_z as data
+
+    
+    param = T.vector("param")
+    alpha = param[0]
+    beta = param[1:]
+    ssq = sigma**2 # T.scalar("ssq")
+    
+    le = (-data[:,-1]*(alpha+T.tensordot(data[:,:-1], beta,1)))
+    lpost = (- LogSumExp((le, T.zeros_like(le)),0).sum()
+                    - 1/(2*ssq) * (alpha**2 + beta.dot(beta)))
+    
+    rval_lpost = theano.function([param], lpost[np.newaxis])
+    rval_lgrad = theano.function([param],  T.grad(lpost, param))
+    rval_lpost_lgrad_definitive = theano.function([param], [lpost, T.grad(lpost, param)])
+    def rval_lpost_lgrad(x, grad=False):
+        if grad:
+            return rval_lpost_lgrad_definitive(x)
+        else:
+            return rval_lpost(x)
+    rval_lhess = theano.function([param],  T.hessian(lpost, param))
+    #rval_lpost_lgrad_lhess = theano.function([ab], [lpost, T.grad(lpost, ab), T.hessian(lpost, ab)])
+    rval_lpost.start = np.array([ -7.06854908e-03,  -1.05940740e-03,  -2.22595260e-03,
+        -1.76019755e-04,  -1.50490322e-02,   8.78030345e-03,
+        -7.37716090e-03,  -7.12096046e-04,   2.63549291e-03,
+        -2.72145365e-03,  -1.24480951e-03,   1.53656546e-03,
+        -2.10982582e-03,   9.54294662e-03,   3.28415735e-03,
+        -4.27019717e-03,  -5.40388605e-03,   1.59955152e-05,
+        -8.39165505e-04,  -8.70450458e-03,   4.59230665e-03,
+        -3.88058536e-03,   7.14414576e-04,   1.57565107e-03,
+        -3.55516986e-04]) # -693.12774797
+    rval_lpost.opt5 = rval_lpost.opt10 = np.array([ 1.17903129,  0.72327228, -0.41081111,  0.40429438, -0.12126461,
+        0.35671227,  0.17615053,  0.14985379, -0.01319223, -0.17613749,
+        0.10723348,  0.22140805, -0.12024603, -0.03042954,  0.13299037,
+        0.27224582, -0.27502516,  0.2889329 , -0.29613563, -0.26507539,
+       -0.12209968,  0.06004149,  0.08724909,  0.02553138,  0.02414447])
+    rval_lpost.lev_10 = -504.5011569532183
+    rval_lpost.mean10 = np.array([ 1.21912752,  0.74494375, -0.42524601,  0.41907027, -0.12642431,
+        0.36976911,  0.18167385,  0.15450298, -0.0126782 , -0.18248051,
+        0.11177484,  0.22735348, -0.12517907, -0.02876698,  0.13781747,
+        0.29856619, -0.28219943,  0.30364463, -0.31440319, -0.28047437,
+       -0.12575181,  0.06176199,  0.09505578,  0.02372538,  0.02272984]) # ess:38k
+    rval_lpost.var10 = np.array([ 0.0086826 ,  0.00822621,  0.01115241,  0.0092435 ,  0.01212074,
+        0.00906877,  0.00869139,  0.00691414,  0.00834668,  0.01123536,
+        0.00966755,  0.00626672,  0.00908454,  0.00744986,  0.00917602,
+        0.01472509,  0.00699316,  0.01105414,  0.01507119,  0.01262483,
+        0.0195209 ,  0.0212143 ,  0.00831238,  0.0168367 ,  0.01607689]) # ess:38k
+    return (rval_lpost, rval_lgrad, rval_lpost_lgrad,rval_lhess)#, rval_lpost_lgrad_lhess)
+
+
+def credit_hlr_theano(lambd, transform = None, theano_symbol = False, neg=False):
+    import theano.tensor as T
+    import theano
+    
+    def LogSumExp(x, axis=None):
+        x_max = T.max(x, axis=axis, keepdims=True)
+        return T.log(T.sum(T.exp(x - x_max), axis=axis, keepdims=True)) + x_max
+    
+    from  datset.data.german_credit import data_z_2way as data
+
+    
+    param = T.vector("param")
+    ssq = param[0]
+    if transform is None:
+        pass
+    elif transform == "sp":
+        ssq = T.nnet.softplus(ssq)
+        
+    alpha = param[1]
+    beta = param[2:]
+    
+    le = (-data[:,-1]*(alpha+T.tensordot(data[:,:-1], beta,1)))
+    lpost = (- LogSumExp((le, T.zeros_like(le)),0).sum()
+                    - 1/(2*ssq) * (alpha**2 + beta.dot(beta)) - data.shape[0]/2*T.log(ssq)-lambd*ssq)
+    if neg:
+        lpost = -lpost
+    if theano_symbol:
+        return lpost
+    else:             
+        rval_lpost = theano.function([param], lpost[np.newaxis])
+        rval_lgrad = theano.function([param],  T.grad(lpost, param))
+        rval_lpost_lgrad = theano.function([param], [lpost, T.grad(lpost, param)])
+        rval_lhess = theano.function([param],  T.hessian(lpost, param))
+        
+        
+        rval_lpost.opt_0_01 = np.array([  1.48330894e-03,   2.32123189e-01,   2.10581621e-01, #without transforms
+        -1.37343452e-01,   1.10535811e-01,  -5.34547911e-02,
+         9.76128206e-02,   7.31552147e-02,   3.39595702e-02,
+         1.09578012e-02,  -5.64125001e-02,   2.32323899e-02,
+         6.61636971e-02,  -2.27567000e-02,   7.64824332e-03,
+         1.64770910e-02,   2.56178157e-02,  -7.48164442e-02,
+         7.82501141e-02,  -3.28552764e-02,  -1.74748743e-02,
+        -5.37079683e-02,   6.60081787e-02,  -1.15141308e-02,
+        -8.03231759e-03,   9.45767737e-06,   5.70771504e-02,
+        -1.67812530e-02,  -4.63400058e-02,  -5.93271569e-03,
+         4.84038000e-02,  -1.04979823e-03,   6.78325490e-03,
+         3.85596778e-02,   1.31623568e-02,   5.17508343e-02,
+        -2.03388354e-02,  -1.97031214e-02,   6.88271876e-04,
+        -1.88241566e-02,   3.14845811e-03,   1.09737749e-02,
+         6.33233867e-02,   2.44021354e-03,  -2.38332689e-02,
+         1.04791926e-02,   1.52008087e-02,  -1.97676826e-02,
+         5.60896981e-02,  -4.47555813e-02,   8.93739911e-02,
+         6.88181332e-02,   2.50701685e-02,  -1.49262635e-05,
+        -2.30763314e-02,   4.15521456e-02,   9.47263938e-03,
+         1.83105780e-02,  -1.81995132e-02,  -6.73780916e-04,
+         6.14959633e-02,  -3.54029263e-02,  -8.99008201e-03,
+         5.93523924e-02,   3.07826246e-02,   1.47499306e-02,
+        -5.04738819e-02,  -9.85327035e-03,   1.22732344e-02,
+        -7.20580520e-02,  -5.02610361e-03,   1.80339148e-02,
+        -2.43079224e-02,   1.42379856e-02,   2.00284754e-03,
+         2.50452469e-02,   2.48632110e-02,   5.59120116e-02,
+         5.69747396e-02,   1.29797762e-01,   1.60026879e-02,
+         1.33449534e-02,  -6.88846417e-03,   1.85348841e-02,
+         5.97326029e-03,   4.36514427e-02,   2.63778710e-02,
+         1.88591045e-03,  -2.00610537e-02,   3.05143298e-02,
+        -9.41296531e-03,   7.73652683e-05,   3.90191492e-02,
+        -2.82429583e-02,   5.16560747e-03,   2.38133607e-02,
+         3.26736525e-02,  -1.94812850e-02,  -4.97476918e-03,
+        -3.28829506e-03,   2.13963887e-02,  -6.14751449e-02,
+        -5.48245043e-02,   2.41075493e-03,  -1.37561933e-02,
+         1.02916355e-02,  -1.74604813e-03,  -3.56202427e-03,
+        -9.15419132e-03,  -1.95489034e-02,   3.83475646e-02,
+        -4.16735482e-03,   1.00511269e-02,  -3.02719311e-02,
+         4.19490416e-02,   1.14798812e-02,  -3.85734442e-03,
+        -1.44240622e-02,  -1.90316999e-02,   1.48070301e-02,
+         2.57163554e-02,   2.80255108e-02,  -2.80932636e-02,
+         1.11571743e-02,   4.54924821e-02,   2.58996220e-02,
+         2.61509917e-02,   1.33785099e-02,   3.78600636e-02,
+        -1.05038886e-03,   9.08467607e-03,   1.60464047e-02,
+         1.49192491e-02,   1.24314205e-03,   9.77079537e-03,
+         1.70685547e-02,   2.60251044e-02,   8.03313091e-03,
+         6.61072719e-03,  -3.97656720e-02,  -3.12861622e-02,
+        -1.57039823e-02,   3.50513532e-02,   1.69355309e-02,
+         3.07620083e-02,   2.47554908e-02,  -4.09233509e-02,
+         1.63744636e-02,   1.91192252e-02,   3.65160711e-03,
+        -4.13080242e-02,  -3.98164336e-02,  -2.18264779e-02,
+         1.28016878e-02,   1.07371236e-02,  -8.79462872e-04,
+         2.22773041e-02,   1.51235942e-03,   8.03865994e-03,
+         2.87451660e-02,   1.97441906e-02,  -1.21854171e-02,
+        -1.70303673e-02,   1.94899251e-02,   1.77271892e-02,
+        -1.73663615e-03,  -7.90606040e-03,   4.42908550e-02,
+         3.19946887e-02,  -9.03399993e-03,  -7.27845673e-03,
+         3.91284433e-02,  -1.26320496e-02,   2.10613945e-02,
+         1.14229846e-02,   4.27058281e-03,   1.69271094e-02,
+         3.73949411e-02,  -2.98521676e-02,   1.64118414e-02,
+        -2.65196500e-03,   1.76838922e-02,  -3.20983118e-02,
+        -3.88779462e-02,  -1.97898139e-02,  -5.87389934e-02,
+         3.27699047e-02,  -2.38977478e-02,  -9.73785074e-03,
+         5.66540379e-02,   4.45371164e-02,   3.05180597e-02,
+        -3.23245188e-02,  -5.37416689e-02,  -1.50999264e-02,
+        -1.07079811e-01,   2.27276551e-02,   4.66713189e-03,
+         4.31241791e-03,  -6.16783079e-03,   2.62164314e-02,
+        -9.96499874e-03,   6.25358185e-02,  -1.59782510e-02,
+        -2.03834467e-03,  -2.11435432e-02,  -2.56492270e-02,
+         1.54577296e-02,   5.17533530e-02,   9.52093930e-03,
+        -1.42424343e-02,  -2.35835914e-02,   1.52108804e-02,
+        -1.95170204e-02,  -6.06709147e-03,   6.14514010e-02,
+        -4.78882510e-03,   1.55438378e-03,  -1.34556524e-02,
+         4.80654392e-02,   7.06766890e-04,  -2.85965676e-02,
+         1.07643140e-02,   5.20248852e-02,   3.43185108e-02,
+        -5.21632297e-03,   7.86715148e-04,  -1.94046947e-02,
+        -9.96072704e-03,   1.71061532e-02,  -1.36344908e-02,
+        -4.19952211e-02,   4.57279153e-02,   3.54418407e-03,
+         3.49428199e-02,  -1.47009512e-03,   4.89579855e-02,
+         5.02867685e-02,   5.94545896e-02,   1.38900884e-02,
+        -5.12376900e-02,  -4.64849999e-02,   1.50191026e-02,
+         2.45199374e-02,  -2.70030891e-02,   1.72061375e-02,
+        -3.32215924e-02,  -3.69152504e-02,   1.33135692e-02,
+         3.07855550e-02,   9.58427742e-03,  -1.25760648e-02,
+         1.23400158e-02,  -2.02094775e-02,   2.11168297e-03,
+        -4.94346307e-02,   2.17070643e-02,   6.12825425e-02,
+         5.06400667e-03,  -1.37552458e-02,   2.83468352e-02,
+         6.15868624e-03,   7.74285635e-03,   1.37415361e-02,
+         6.34516122e-02,  -9.63845455e-03,  -6.13713091e-02,
+         4.20455719e-02,   1.19717616e-03,  -1.31413102e-02,
+         3.06006270e-03,   4.27981091e-02,  -9.58403999e-04,
+        -2.26399082e-02,  -9.83366353e-03,  -7.62603959e-03,
+         6.89370095e-03,  -1.22740820e-02,   7.00931281e-03,
+        -6.31101464e-02,  -1.69374814e-02,  -8.85205697e-02,
+         3.80205252e-02,  -4.15448766e-03,   9.88235052e-03,
+        -1.08853074e-04,   7.02349341e-03,  -3.89461386e-02,
+         2.90273673e-03,   1.47432234e-03,  -8.24054746e-04,
+        -3.96488889e-02,  -1.17003556e-01,   3.89862183e-02,
+        -7.29617434e-03,  -6.32151059e-04,   8.32364318e-03,
+         3.88253331e-02,   5.55654248e-02,  -1.04454851e-02,
+        -3.04055521e-02,  -1.40969595e-01])
+        return (rval_lpost, rval_lgrad, rval_lpost_lgrad, rval_lhess)
 
 def credit_hlr(lambd, softplus_transform = False):
     from  datset.data.german_credit import data_z_2way as data
@@ -264,11 +461,12 @@ def credit_hlr(lambd, softplus_transform = False):
 
 
 
+
 class PlainPropDistr(object):
-    def __init__(self, def_ratio, mu):
-        self.def_ratio = 0.1
-        self.def_prop_dist = dist.mvt(mu, np.eye(mu.size)*10, 25)
-        self.prop_dist = dist.mvnorm(mu, np.eye(mu.size))
+    def __init__(self, def_ratio, mu, K):
+        self.def_ratio = def_ratio
+        self.def_prop_dist = dist.mvt(mu, K*1.5, 25)
+        self.prop_dist = dist.mvnorm(mu, K)
     
     def logpdf(self, s):
         return logsumexp([self.def_prop_dist.logpdf(s) + log(self.def_ratio),
@@ -285,14 +483,18 @@ class PlainPropDistr(object):
 class HlrPropDistr(object):
     def __init__(self, def_ratio, mu):
         self.def_ratio = 0.1
-        self.def_sigsq_dist = stats.gamma(mu[0]/20, scale=20)
+        self.def_sigsq_dist = stats.norm(invsoftplus(mu[0]), 20)
         self.def_rest_dist = dist.mvt(mu[1:], np.eye(mu.size - 1)*20, 10)
-        self.sigsq_dist = stats.gamma(mu[0]/5, scale=5)
-        self.rest_dist = dist.mvnorm(mu[1:], np.eye(mu.size - 1)*5)
+        self.sigsq_dist = stats.norm(invsoftplus(mu[0]), 3)
+        self.rest_dist = dist.mvnorm(mu[1:], np.eye(mu.size - 1)*4)
     
     def logpdf(self, s):
-        return logsumexp([self.def_sigsq_dist.logpdf(s[:, :1]) + self.def_rest_dist.logpdf(s[:, 1:]) + log(self.def_ratio),
-                           self.sigsq_dist.logpdf(s[:, :1]) + self.rest_dist.logpdf(s[:, 1:]) + log(1.-self.def_ratio)],0)
+        
+        first = invsoftplus(s[:,0])
+        rval = logsumexp([self.def_sigsq_dist.logpdf(first) + self.def_rest_dist.logpdf(s[:, 1:]) + log(self.def_ratio),
+                           self.sigsq_dist.logpdf(first) + self.rest_dist.logpdf(s[:, 1:]) + log(1.-self.def_ratio)],0)
+        return rval
+        
     def rvs(self, num_samps):
         def_num_samps = int(num_samps * self.def_ratio)
         nondef_num_samps = num_samps - def_num_samps
@@ -300,27 +502,37 @@ class HlrPropDistr(object):
         if self.def_ratio > 0:
             samps = np.vstack([samps,
                                np.hstack([self.def_sigsq_dist.rvs(def_num_samps)[:, np.newaxis], self.def_rest_dist.rvs(def_num_samps)])])
+        
+        samps[:,0] = softplus(samps[:,0])
         assert(np.all(samps[:, 0]>0))
-        return samps       
+        return samps
 
+def ess(lw):
+    return exp(-(logsumexp((lw - logsumexp(lw))*2)))
 
-def credit_simple_is(name_dataset, num_samps):
+def credit_simple_is(name_dataset, num_samps, prop_dist = None):
     def_ratio = 0.1    
     if name_dataset == "plain":
-        (f, _, _) = credit_plain(10)
-        prop_dist = PlainPropDistr(def_ratio, f.opt10)
+        (f, _, _, hess) = credit_plain_theano(10)
+        if prop_dist is None:
+            prop_dist =  PlainPropDistr(0.1, f.opt10, np.linalg.inv(-hess(f.opt10))) #PlainPropDistr(0.1, m3)
     elif name_dataset == "hlr":
-        (f, _, _) = credit_hlr(0.01)
-        prop_dist = HlrPropDistr(def_ratio, f.opt_0_01)
+        (f, _, _, hess) = credit_hlr_theano(0.01)
+        K = np.linalg.inv(-hess(f.opt_0_01))
+        K = K + np.diag([-np.min(np.diag(K))*1.5]*302)
+        K = np.eye(302)*0.00001
+        prop_dist = dist.transform.softplus(dist.mvnorm(f.opt_0_01, K), [0])
         
     samps = prop_dist.rvs(num_samps)
     lprop = prop_dist.logpdf(samps)[:, None]
     lpost = np.apply_along_axis(f, 1, samps)
     lw = lpost - lprop
+    assert(np.all(1- np.isnan(lw)))
     lw_norm = lw - logsumexp(lw)
     
     w_norm = exp(lw_norm)
     mu = np.sum(samps*w_norm, 0)
     var = np.sum((samps-mu)**2*w_norm, 0)
     print("expectation", mu, var)
+    print("ess:", ess(lw))
     return {"mu": mu, "var": var, "samps":samps, "lw":lw, "w_norm":w_norm}

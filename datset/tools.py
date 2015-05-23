@@ -15,7 +15,7 @@ from numpy import exp, log, sqrt
 from scipy.misc import logsumexp
 from numpy.linalg import inv
 
-__all__ = ["log_sign", "exp_sign", "logsumexp_sign", "convert_to_lpost_and_grad_form"]
+__all__ = ["log_sign", "exp_sign", "logsumexp_sign", "convert_to_lpost_and_grad_form", "softplus", "invsoftplus"]
 
 
 def log_sign(a):
@@ -65,3 +65,31 @@ def convert_to_lpost_and_grad_form(lp, lg):
         else:
             return lp(param)
     return rval
+    
+
+def int_softplus(x):
+    if x >= 34:
+        # in this case, limitations in floating-point
+        # precision result in log(exp(y) - 1) == y
+        return x
+    elif x <= -37:
+        # this also results from precision limits
+        return 10**-8
+    else:
+        return log(1 + exp(x))
+        
+softplus = np.vectorize(int_softplus)
+
+def int_invsoftplus(y):
+    y = float(y)
+    if y >= 34:
+        # in this case, limitations in floating-point
+        # precision result in log(exp(y) - 1) == y
+        return y 
+    elif y < 0:
+        raise ValueError("Function defined only for y >= 0")
+    elif y == 0:
+        #perturb input so as not to return -inf
+        y += stats.gamma(100,scale=0.00001).rvs()
+    return log(exp(y) - 1)
+invsoftplus = np.vectorize(int_invsoftplus)
