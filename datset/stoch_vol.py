@@ -31,6 +31,9 @@ def t_logpdf(x, nu):
 
 def stoch_vol(transform = None, theano_symbol = False, neg=False, opt_grad = False):
     from datset.data.stoch_vol_opt import optimum
+    import pickle
+    
+    
     def LogSumExp(x, axis=None):
         x_max = T.max(x, axis=axis, keepdims=True)
         return T.log(T.sum(T.exp(x - x_max), axis=axis, keepdims=True)) + x_max
@@ -71,6 +74,9 @@ def stoch_vol(transform = None, theano_symbol = False, neg=False, opt_grad = Fal
                 return rval_lpost(x)
     #rval_lhess = theano.function([param],  T.hessian(lpost, param))
     rval_lpost.opt = optimum
+    rval_lpost.lev = -798.93510930385889
+    with open(os.path.split(__file__)[0]+"/data/stoch_vol_ground_truth.pickle", "rb") as fil:
+        (rval_lpost.mean, rval_lpost.var, rval_lpost.var_var) = pickle.load(fil)
     return (rval_lpost, rval_lgrad, lp_lg)
 
 def factor_analysis():
