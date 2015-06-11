@@ -15,8 +15,7 @@ from numpy import exp, log, sqrt
 from scipy.misc import logsumexp
 from numpy.linalg import inv
 
-import theano.tensor as T
-import theano
+
 
 import os
 
@@ -26,10 +25,14 @@ def tnorm(mu, stddev):
     return stats.truncnorm(-mu/stddev, np.inf, loc=mu, scale=stddev)
 
 def t_logpdf(x, nu):
+    import theano.tensor as T
+
     const = (T.gammaln((nu + 1) / 2) -(T.gammaln(nu/2) + (T.log(nu)+T.log(np.pi)) * 0.5))
     return const - (nu+1)/2*T.log(1+x**2/nu)
 
 def stoch_vol(transform = None, theano_symbol = False, neg=False, opt_grad = False):
+    import theano.tensor as T
+    import theano
     from datset.data.stoch_vol_opt import optimum
     import pickle
     
@@ -78,21 +81,3 @@ def stoch_vol(transform = None, theano_symbol = False, neg=False, opt_grad = Fal
     with open(os.path.split(__file__)[0]+"/data/stoch_vol_ground_truth.pickle", "rb") as fil:
         (rval_lpost.mean, rval_lpost.var, rval_lpost.var_var) = pickle.load(fil)
     return (rval_lpost, rval_lgrad, lp_lg)
-
-def factor_analysis():
-    prior_lambd_diag = tnorm(1,2)
-    prior_lambd_tri = stats.norm(0,2)
-    prior_xi = stats.norm()
-    prior_sigm_sq = stats.invgamma(1,scale=1)
-    def logpost(xi, lambd, sigm_sq, idx_dat = None):
-        pr = (prior_lambd_diag.logpdf(lambd.flat[diag_idx]).sum() +
-              prior_lambd_tri.logpdf(lambd.flat[tri_idx]).sum() +
-              prior_sigm_sq.logpdf(sigm_sq).sum())
-        llh_dist = stats.multivariate_normal(cov = np.diag(sigm_sq))
-        
-        if idx_dat is None:
-            return (pr + prior_xi.logpdf(xi).sum(1)
-                    + llh_dist.logpdf(data - xi.dot(lambd)))
-        else:
-            return (pr + prior_xi.logpdf(xi[idx_dat]).sum()
-                    + llh_dist.logpdf(data[idx_dat] - xi[idx_dat].dot(lambd))).sum()
