@@ -97,7 +97,7 @@ def credit_plain_theano(sigma):
     from  datset.data.german_credit import data_z as data
 
     
-    param = T.vector("param")
+    param = T.dvector("param")
     alpha = param[0]
     beta = param[1:]
     ssq = sigma**2 # T.scalar("ssq")

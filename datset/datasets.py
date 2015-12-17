@@ -17,6 +17,10 @@ from numpy.linalg import inv
 from datset.tools import *
 
 import distributions as dist
+import theano.tensor as T
+import theano
+
+theano.config.compute_test_value = 'warn'
 
 __all__ = ["banana", "mvgauss",
            "gauss_mixture_bimod",
@@ -25,7 +29,9 @@ __all__ = ["banana", "mvgauss",
            "gauss_grid",
            "negate", "t_mixture_trim_bad"]
 
-
+def LogSumExp(x, axis=None):
+    x_max = T.max(x, axis=axis, keepdims=True)
+    return T.log(T.sum(T.exp(x - x_max), axis=axis, keepdims=True)) + x_max
 
 
 def banana(ssban= 100, bban = 0.03, lev = 0, ):
@@ -39,6 +45,7 @@ def banana(ssban= 100, bban = 0.03, lev = 0, ):
                           x[1]-bban*(x[0]**2-ssban) ])
     b.mean = np.array([0, 0])
     b.lev = lev
+    b.var100_0_03 = np.array([ 66.84063885,   6.71792796])
     return (b, gradb, convert_to_lpost_and_grad_form(b, gradb))
 
 def mvgauss(dim = 250, df_cov = 250, mean = None, lev = 0):
@@ -52,7 +59,7 @@ def mvgauss(dim = 250, df_cov = 250, mean = None, lev = 0):
     def lpost(x):
         return mvn.logpdf(x) + lev
     def lgrad(x):
-        return mvn.logpdf_grad(x) + lev
+        return mvn.logpdf_grad(x)
     def lp_and_lgr(x,grad=False):
          if not grad:
              return lpost(x)
@@ -65,15 +72,40 @@ def mvgauss(dim = 250, df_cov = 250, mean = None, lev = 0):
     
     return (lpost, lgrad, lp_and_lgr)
 
-def gmix(weights, dists, lev):
+def gmix(weights, dists, lev, dim):
     weights = log(weights)
     weights = weights - logsumexp(weights)
-
-    lpost = lambda param: logsumexp(weights + [d.logpdf(param) for d in dists]) + lev
-    lgrad = lambda param: logsumexp([exp(weights[i]) * dists[i].logpdf_grad(param) for i in range(len(dists))], 0)
     
+    def rvs(num_samps):
+        #stratification over components by residual sampling
+        point = 0
+        nsamps = np.int_(np.floor(np.exp(weights)*num_samps))
+        nsamps = nsamps + dist.categorical(weights, True).rvs(num_samps-nsamps.sum(), True).sum(0)
+        
+        retval = np.zeros((np.sum(nsamps), dists[0].rvs(1).size))
+        for i in range(len(nsamps)):
+            if nsamps[i] == 0:
+                continue
+            retval[point:point+nsamps[i]] = dists[i].rvs(nsamps[i])
+            point += nsamps[i]
+        
+        
+        np.random.shuffle(retval)
+        return retval
+    
+    
+    param = T.dvector("param")
+    param.tag.test_value = rvs(1)[0]
+    res = LogSumExp([dists[i].logpdf(param, True) + weights[i] for i in range(len(dists))])+ lev
+    lpost = theano.function([param], res[0,0])
+    lgrad = theano.function([param], T.grad(res[0,0] , param))
+    
+
+    lpost.rvs = rvs
     lpost.lev = lev
     lpost.mean = np.sum([exp(weights[i]) * dists[i].mu for i in range(len(dists))],0)
+    lpost.cov = np.cov(rvs(2000).T)
+    lpost.var = np.diag(lpost.cov)
     
     return (lpost, lgrad)
 
@@ -81,21 +113,21 @@ def gauss_mixture_bimod(distance = 2, dim = 2, lev = 0):
     d1 = dist.mvnorm(np.zeros(dim), np.eye(dim))#dist.wishart_rv(np.eye(dim)*3, 250))
     d2 = dist.mvnorm(np.zeros(dim)+distance, np.eye(dim))#dist.wishart_rv(np.eye(dim)*3, 250))
     
-    (lp, lg) = gmix((3, 7), (d1, d2), lev)
+    (lp, lg) = gmix((3, 7), (d1, d2), lev, dim)
     
     return (lp, lg, convert_to_lpost_and_grad_form(lp, lg))
 
 def gauss_mixture_trim(distance = 1, dim = 2, lev = 0):
     (lp, lg) = gmix((3, 5, 2), (dist.mvnorm(np.zeros(dim), np.eye(dim)),
                              dist.mvnorm(np.zeros(dim)+distance, np.eye(dim)),
-                             dist.mvnorm(np.zeros(dim)+distance*2, np.eye(dim))), lev)
+                             dist.mvnorm(np.zeros(dim)+distance*2, np.eye(dim))), lev, dim)
     
     return (lp, lg, convert_to_lpost_and_grad_form(lp, lg))
 
 def t_mixture_trim(distance = 1, dim = 2, df = 2, lev = 0):
     (lp, lg) = gmix((3, 5, 2), (dist.mvt(np.zeros(dim), np.eye(dim), df),
                              dist.mvt(np.zeros(dim)+distance, np.eye(dim),df),
-                             dist.mvt(np.zeros(dim)+distance*2, np.eye(dim),df)), lev)
+                             dist.mvt(np.zeros(dim)+distance*2, np.eye(dim),df)), lev, dim)
     
     return (lp, lg, convert_to_lpost_and_grad_form(lp, lg))
     
@@ -113,7 +145,7 @@ def t_mixture_trim_bad(distance=2.5, lev = 0, cut_dim = 10):
     dists =  (dist.mvt(np.zeros(cut_dim), iwd.rv()[-cut_dim:, -cut_dim:], dim),
               dist.mvt(np.zeros(cut_dim)+distance, iwd.rv()[-cut_dim:, -cut_dim:],dim),
               dist.mvt(mean3, iwd.rv()[-cut_dim:, -cut_dim:],dim))
-    (lp, lg) = gmix(weights, dists, lev)
+    (lp, lg) = gmix(weights, dists, lev, dim)
     #rvs = np.vstack([dists[i].rvs(np.int(weights[i]*5000)) for i in range(3)])
     lp.var = np.array([  3.2464031 ,   6.77864311,   9.38763421,   7.46896529,
         43.68620454,  11.944712  ,   3.23960617,  56.10139093,
@@ -131,7 +163,7 @@ def gauss_grid(reweight = False, lev = 0):
         weights = 1./(np.abs(means*0.125).sum(1)+1)
         #print(weights)
 
-    (lp, lg) = gmix(weights, [dist.mvnorm(m, np.eye(2)) for m in means], lev)
+    (lp, lg) = gmix(weights, [dist.mvnorm(m, np.eye(2)) for m in means], lev, 2)
     return (lp, lg, convert_to_lpost_and_grad_form(lp, lg))
     
 
