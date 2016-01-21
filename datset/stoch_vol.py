@@ -77,7 +77,7 @@ class LogpOp(theano.Op):
             return [self.grad_logp_op(inputs[0], self(inputs[0]),
                                              gradients[0])]
 
-class StochVolNUTS(pymc3.Continuous):
+class StochVolNUTS(pm.Continuous):
     """
     Black Box Continuous distribution which only calls an underlying log density function
     """
