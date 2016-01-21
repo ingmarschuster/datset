@@ -85,7 +85,7 @@ class StochVolNUTS(pm.Continuous):
         default_value = np.zeros(3001)
         (f, gradf, f_gradf) = stoch_vol(transform = 'sp', theano_symbol = False, neg=False, opt_grad = False)
         kwargs['shape'] = default_value.shape
-        super(BlackBoxContinuous, self).__init__(*args, **kwargs)
+        super(StochVolNUTS, self).__init__(*args, **kwargs)
         self.mean = self.mode = default_value
         self.logp_op = LogpOp(kwargs['shape'], f, gradf) 
 
